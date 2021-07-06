@@ -102,3 +102,80 @@ mod.model <- rma.mv(yi = AUC, V = AUC_var,
                     mods = ~ `Biomarker Type` + Cohorts)
 
 summary(mod.model)
+
+                                           
+###############################################
+# Novel Biomarkers 
+#Filter the data and change the datatypes of the relevant columns
+data3 <- data %>% 
+  filter(AUC > 0.5) %>%
+  filter(`CA19-9 or Novel` == 'Novel') %>%
+  filter(`Corresponding Author Name` != 'NA') %>%
+  select(which(colMeans(is.na(.)) < 0.25)) %>% 
+  select(selected) %>% 
+  mutate_at('Number of Markers', as.numeric) 
+
+#Convert all string columns to factors
+data3_Nov <- data3 %>% 
+  mutate_if(sapply(data3, is.character), as.factor)
+
+#Generate the metaanalysis for the markers containing CA19-9 only
+m.gen_results_Nov <- metagen(TE = data3_Nov$AUC,
+                         seTE = data3_Nov$"Calculated SE",
+                         lower = Q1,
+                         upper = Q2,
+                         data = data3_Nov,
+                         studlab = data3_Nov$"Study ID",
+                         comb.fixed = FALSE,
+                         comb.random = TRUE,
+                         title = "Novel Biomarker MetaAnalysis")
+
+
+#Set the IDs for the rows in R and calculate the within group variance
+data3_Nov$es.id <- as.factor(rownames(data3_Nov))
+data3_Nov_variance <- as.data.frame(apply(data3_Nov[,12], 2, function(x) tapply(x, data3_Nov$`Study ID`, var)))
+colnames(data3_Nov_variance)[1] <- "AUC_var"
+
+#Prepare the dataframe for multilevel metaanalysis with within group variance
+data3_Nov_variance[is.na(data3_Nov_variance)] = 0.0000000001
+data3_Nov_variance$'Study ID' <- rownames(data3_Nov_variance)
+data3_Nov_meta <- left_join(data3_Nov, data3_Nov_variance)
+colnames(data3_Nov_meta)[1] <- 'Study_ID'
+colnames(data3_Nov_meta)[5] <- 'Author'
+
+
+#Perform the multilevel metaanalysis based on title and new ID
+full.model_Nov <- rma.mv(yi = AUC, 
+                     V = AUC_var, 
+                     slab = Author, 
+                     data = data3_Nov_meta,
+                     random = ~ 1 | Author/es.id, 
+                     test = "t",
+                     method = "REML")
+
+
+i3 <- var.comp(full.model_Nov)
+plot(i3)
+
+#Perform the comparison with a two-level model
+l3.removed <- rma.mv(yi = AUC, 
+                     V = AUC_var, 
+                     slab = Author,
+                     data = data3_Nov_meta,
+                     random = ~ 1 | Author/es.id, 
+                     test = "t", 
+                     method = "REML",
+                     sigma2 =  c(0, NA))
+
+summary(l3.removed)
+anova(full.model_Nov, l3.removed) #Lower BIC and AIC indicate the best model fit
+
+#Perform subgroup analyses in three-level models to assess moderators
+mod.model_Nov <- rma.mv(yi = AUC, V = AUC_var, 
+                    slab = Author, data = data3_Nov_meta,
+                    random = ~ 1 | Author/es.id, 
+                    test = "t", method = "REML",
+                    mods = ~ `Biomarker Type`)
+
+summary(mod.model_Nov)
+
